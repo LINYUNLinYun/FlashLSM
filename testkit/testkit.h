@@ -30,6 +30,10 @@
 #include <stdlib.h>
 #include <limits.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** Maximum number of allowed test cases. */
 #define TK_MAX_TESTS       1024
 /** Time limit (in seconds) for each test case. */
@@ -71,6 +75,8 @@ struct tk_testcase {
     const char **argv;
     const char *argv_copy[TK_MAX_ARGV_LEN];
 };
+
+void tk_add_test(struct tk_testcase t);
 
 /**
  * Evaluates the condition (cond); if false, prints an error message
@@ -246,8 +252,6 @@ struct tk_testcase {
     /* Define a pre-main constructor to register this test case. */ \
     __attribute__((constructor)) \
     void TK_UNIQUE_NAME(reg##name_)() { \
-        void tk_add_test(struct tk_testcase t); \
-        \
         /* Call tk_add_test() to register. */ \
         tk_add_test( (struct tk_testcase) { \
             .enabled = 1, \
@@ -263,3 +267,7 @@ struct tk_testcase {
     /* Define the test function. */ \
     static void TK_UNIQUE_NAME(name_)(body_arg)
     // Followed by the test case body { ... }
+
+#ifdef __cplusplus
+}
+#endif

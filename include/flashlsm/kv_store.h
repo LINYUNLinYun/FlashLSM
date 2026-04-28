@@ -54,7 +54,7 @@ private:
     std::uint64_t next_sstable_id_ {1};             // 下一个 SSTable ID
 
     MemTable memtable_;                  // MemTable
-    WriteAheadLog wal_;
+    WriteAheadLog wal_;                 // 预写日志 
     std::vector<SSTable> sstables_;
 };
 

@@ -15,7 +15,11 @@ public:
     // 将记录持久化到 WAL，保证进程崩溃后仍可恢复。
     void append(const Record& record);
 
-    // 按写入顺序回放 WAL 中的全部记录。
+    /**
+     * @brief 按写入顺序回放WAL 中的全部记录。
+     * 
+     * @return std::vector<Record> records
+     */
     std::vector<Record> replay() const;
 
     // 在成功 flush 之后清空或轮转 WAL。

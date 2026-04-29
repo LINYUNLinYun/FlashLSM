@@ -32,10 +32,16 @@ public:
     void flush();
 
 private:
-    // 启动时根据现有 WAL 和 SSTable 重建内存状态。
+    /**
+     * @brief 重启时时根据WAL和SSTable 重建内存状态。
+     * 
+     */
     void recover();
 
-    // 扫描数据目录中的 SSTable，并按“从新到旧”顺序组织读路径。
+    /**
+     * @brief 重启时重建sstables
+     * 
+     */
     void load_sstables();
 
     // 统一分配递增序列号，保证所有写入都能比较新旧版本。

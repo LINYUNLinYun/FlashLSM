@@ -159,3 +159,74 @@ UnitTest(kvstore_flush_persists_and_serves_from_sstable) {
     tk_assert(beta.value() == "two", "unexpected beta value after flush");
     tk_assert(has_sstable, "expected flush to create sst_1.sst");
 }
+
+UnitTest(kvstore_replays_wal_after_restart) {
+    const fs::path dir = make_temp_dir("kvstore-wal-recovery");
+
+    {
+        flashlsm::KVStore store(dir, 1 << 20);
+        store.put("alpha", "one");
+        store.put("beta", "two");
+        store.remove("alpha");
+    }
+
+    flashlsm::KVStore recovered(dir, 1 << 20);
+    const auto alpha = recovered.get("alpha");
+    const auto beta = recovered.get("beta");
+
+    tk_assert(!alpha.has_value(),
+              "expected alpha tombstone to survive restart");
+    tk_assert(beta.has_value(), "expected beta to be recovered from WAL");
+    tk_assert(beta.value() == "two", "unexpected beta value after restart");
+}
+
+UnitTest(kvstore_memtable_overrides_existing_sstable) {
+    const fs::path dir = make_temp_dir("kvstore-memtable-over-sstable");
+
+    {
+        flashlsm::KVStore store(dir, 1 << 20);
+        store.put("alpha", "one");
+        store.flush();
+        store.put("alpha", "two");
+
+        const auto alpha = store.get("alpha");
+        tk_assert(alpha.has_value(),
+                  "expected memtable value to shadow older SSTable");
+        tk_assert(alpha.value() == "two",
+                  "expected latest memtable value, got %s",
+                  alpha->c_str());
+    }
+
+    flashlsm::KVStore recovered(dir, 1 << 20);
+    const auto alpha = recovered.get("alpha");
+
+    tk_assert(alpha.has_value(), "expected alpha to survive restart");
+    tk_assert(alpha.value() == "two",
+              "expected WAL-recovered value to remain latest");
+}
+
+UnitTest(kvstore_latest_sstable_wins_after_multiple_flushes) {
+    const fs::path dir = make_temp_dir("kvstore-multi-sstable");
+
+    {
+        flashlsm::KVStore store(dir, 1 << 20);
+        store.put("alpha", "one");
+        store.flush();
+
+        store.put("alpha", "two");
+        store.put("beta", "three");
+        store.flush();
+    }
+
+    flashlsm::KVStore recovered(dir, 1 << 20);
+    const auto alpha = recovered.get("alpha");
+    const auto beta = recovered.get("beta");
+
+    tk_assert(alpha.has_value(), "expected alpha to be found in SSTables");
+    tk_assert(alpha.value() == "two",
+              "expected newest SSTable value, got %s", alpha->c_str());
+    tk_assert(beta.has_value(), "expected beta to be found in newest SSTable");
+    tk_assert(beta.value() == "three", "unexpected beta value after restart");
+    tk_assert(fs::exists(dir / "sst_1.sst"), "expected first SSTable file");
+    tk_assert(fs::exists(dir / "sst_2.sst"), "expected second SSTable file");
+}

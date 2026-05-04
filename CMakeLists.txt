@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(${PROJECT_NAME}
+    src/compaction.cpp
     src/kv_store.cpp
     src/memtable.cpp
     src/record.cpp

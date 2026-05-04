@@ -156,4 +156,9 @@ void KVStore::write_record(const Record& record) {
     }
 }
 
+void KVStore::compact() {
+    Compaction compaction(data_directory_, sstables_, next_sstable_id_);
+    compaction.run();
+}
+
 }  // namespace flashlsm

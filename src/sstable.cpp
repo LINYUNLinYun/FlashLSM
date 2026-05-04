@@ -171,4 +171,76 @@ void SSTable::load_index() {
 
 }
 
+std::uint64_t SSTable::id() const {
+    std::filesystem::path file_path = table_path_;
+    const std::string prefix = "sst_";
+    // 如果是文件 检查是不是.sst文件
+    if(file_path.extension() == ".sst"){
+        std::string filename = file_path.filename().string();
+        // 检查名字是不是 sst_数字.sst这个格式 
+        if(filename.substr(0,prefix.size()) == prefix){
+            std::size_t dot_pos = filename.find('.');
+            if(dot_pos == std::string::npos){
+                throw std::runtime_error("invalid sstable file name: " + filename);
+            }
+            std::string id_str = filename.substr(prefix.size(), dot_pos - prefix.size());
+            if(id_str.empty()){
+                throw std::runtime_error("invalid sstable file name: " + filename);
+            } 
+            uint64_t id = std::stoull(id_str);
+            return id;
+        }      
+    }
+    return 0;
+}
+
+std::vector<Record> SSTable::get_all_records() const {
+    std::vector<Record> records;
+    std::ifstream input(table_path_);
+    if(!input.is_open()){
+        throw std::runtime_error("failed to open SSTable file for reading all records");
+    }
+    for(const auto& [key, offset] : key_to_offset_){
+        // 读指针移动
+        input.seekg(static_cast<std::streampos>(offset));
+        if(!input){
+            throw std::runtime_error("failed to seek offset in .sst");
+        }
+        std::string line;
+        if(!std::getline(input, line)){
+            throw std::runtime_error("failed to read line from SSTable file");
+        }
+
+        std::size_t first_tab = line.find('\t');
+        std::size_t second_tab = line.find('\t', first_tab + 1);
+        std::size_t third_tab = line.find('\t', second_tab + 1);
+
+        if (first_tab == std::string::npos ||
+            second_tab == std::string::npos ||
+            third_tab == std::string::npos) {
+            throw std::runtime_error("invalid record format");
+        }
+
+        Record record;
+        record.sequence_number = std::stoull(line.substr(0, first_tab));
+
+        std::string type_str = line.substr(first_tab + 1, second_tab - first_tab - 1);
+        if (type_str == "PUT") {
+            record.type = RecordType::Put;
+        } else if (type_str == "DEL") {
+            record.type = RecordType::Delete;
+        } else {
+            throw std::runtime_error("invalid record type in SSTable file");
+        }
+
+        record.key = line.substr(second_tab + 1, third_tab - second_tab - 1);
+        record.value = line.substr(third_tab + 1);
+
+        records.push_back(record);
+    }
+
+    
+    return records;
+}
+
 }  // namespace flashlsm

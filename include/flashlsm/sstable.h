@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "flashlsm/record.h"
 
@@ -40,6 +41,15 @@ public:
     std::optional<Record> get(const std::string& key) const;
 
     const std::filesystem::path& path() const;
+
+    // 获取ID（table path解析）。
+    std::uint64_t id() const;
+
+    /**
+     * @brief 按 key 顺序读取 SSTable 中的全部记录。
+     * 用于 compaction 时的多路归并，返回的 vector 已按 key 排序。
+     */
+    std::vector<Record> get_all_records() const;
 
 private:
     // 维护 key 到磁盘偏移的映射，简化 MVP 阶段的点查。

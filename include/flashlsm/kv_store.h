@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "flashlsm/compaction.h"
 #include "flashlsm/memtable.h"
 #include "flashlsm/sstable.h"
 #include "flashlsm/write_ahead_log.h"
@@ -28,8 +29,14 @@ public:
      */
     void remove(const std::string& key);
 
-    // 手动触发 flush，便于测试和受控实验。
     void flush();
+
+    /**
+     * @brief 触发一次 compaction：选取若干老 SSTable，按 key 归并去重，
+     *        合并为一个新的 SSTable，然后删除旧文件。
+     *        如果没有可合并的 SSTable，直接返回。
+     */
+    void compact();
 
 private:
     /**

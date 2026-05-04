@@ -20,6 +20,18 @@ fs::path make_temp_dir(const std::string& name) {
     return dir;
 }
 
+std::size_t count_sstable_files(const fs::path& dir) {
+    std::size_t count = 0;
+
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".sst") {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 flashlsm::Record make_put_record(std::uint64_t sequence_number,
                                  std::string key,
                                  std::string value) {
@@ -229,4 +241,106 @@ UnitTest(kvstore_latest_sstable_wins_after_multiple_flushes) {
     tk_assert(beta.value() == "three", "unexpected beta value after restart");
     tk_assert(fs::exists(dir / "sst_1.sst"), "expected first SSTable file");
     tk_assert(fs::exists(dir / "sst_2.sst"), "expected second SSTable file");
+}
+
+UnitTest(kvstore_compact_keeps_latest_records_and_newer_sstables) {
+    const fs::path dir = make_temp_dir("kvstore-compaction-latest");
+
+    {
+        flashlsm::KVStore store(dir, 1 << 20);
+
+        store.put("alpha", "one");
+        store.put("old_only", "stable");
+        store.flush();
+
+        store.put("alpha", "two");
+        store.put("beta", "old-beta");
+        store.flush();
+
+        store.put("beta", "new-beta");
+        store.put("gamma", "three");
+        store.flush();
+
+        store.put("delta", "four");
+        store.flush();
+
+        store.put("alpha", "five");
+        store.flush();
+
+        store.compact();
+
+        const auto alpha = store.get("alpha");
+        const auto beta = store.get("beta");
+        const auto gamma = store.get("gamma");
+        const auto delta = store.get("delta");
+        const auto old_only = store.get("old_only");
+
+        tk_assert(alpha.has_value(), "expected alpha after compaction");
+        tk_assert(alpha.value() == "five",
+                  "expected newer un-compacted SSTable to win for alpha");
+        tk_assert(beta.has_value(), "expected beta after compaction");
+        tk_assert(beta.value() == "new-beta",
+                  "expected latest compacted beta value");
+        tk_assert(gamma.has_value(), "expected gamma after compaction");
+        tk_assert(gamma.value() == "three", "unexpected gamma value");
+        tk_assert(delta.has_value(), "expected delta after compaction");
+        tk_assert(delta.value() == "four", "unexpected delta value");
+        tk_assert(old_only.has_value(), "expected old_only after compaction");
+        tk_assert(old_only.value() == "stable", "unexpected old_only value");
+    }
+
+    flashlsm::KVStore recovered(dir, 1 << 20);
+
+    tk_assert(recovered.get("alpha").value() == "five",
+              "expected compacted state to survive restart for alpha");
+    tk_assert(recovered.get("beta").value() == "new-beta",
+              "expected compacted state to survive restart for beta");
+    tk_assert(fs::exists(dir / "sst_5.sst"),
+              "expected newest un-compacted SSTable to remain");
+    tk_assert(fs::exists(dir / "sst_6.sst"),
+              "expected compaction to create sst_6.sst");
+    tk_assert(!fs::exists(dir / "sst_1.sst"),
+              "expected oldest SSTable to be removed");
+    tk_assert(!fs::exists(dir / "sst_2.sst"),
+              "expected compacted SSTable to be removed");
+    tk_assert(!fs::exists(dir / "sst_3.sst"),
+              "expected compacted SSTable to be removed");
+    tk_assert(!fs::exists(dir / "sst_4.sst"),
+              "expected compacted SSTable to be removed");
+    tk_assert(count_sstable_files(dir) == 2,
+              "expected exactly two SSTable files after compaction");
+}
+
+UnitTest(kvstore_compact_drops_obsolete_tombstone) {
+    const fs::path dir = make_temp_dir("kvstore-compaction-tombstone");
+
+    {
+        flashlsm::KVStore store(dir, 1 << 20);
+
+        store.put("alpha", "one");
+        store.flush();
+
+        store.remove("alpha");
+        store.flush();
+
+        store.compact();
+
+        const auto alpha = store.get("alpha");
+        tk_assert(!alpha.has_value(),
+                  "expected alpha to remain deleted after compaction");
+    }
+
+    flashlsm::KVStore recovered(dir, 1 << 20);
+    const auto alpha = recovered.get("alpha");
+
+    tk_assert(!alpha.has_value(),
+              "expected compacted tombstone deletion to survive restart");
+    tk_assert(!fs::exists(dir / "sst_1.sst"),
+              "expected old value SSTable to be removed");
+    tk_assert(!fs::exists(dir / "sst_2.sst"),
+              "expected tombstone SSTable to be removed");
+    tk_assert(fs::exists(dir / "sst_3.sst"),
+              "expected compaction output SSTable to exist");
+    tk_assert(count_sstable_files(dir) == 1,
+              "expected exactly one SSTable file after tombstone compaction");
 }

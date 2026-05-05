@@ -14,12 +14,24 @@ public:
     void put(const std::string& key, const std::string& value);
     std::optional<std::string> get(const std::string& key);
     void remove(const std::string& key);
+    void flush();
+    void compact();
 };
 ```
 
 `remove()` is implemented by writing a tombstone rather than deleting data immediately.
 
 ## 3. Core Components
+
+### Component Responsibilities
+
+| Component | Responsibility |
+|---|---|
+| `KVStore` | Public API, sequence number allocation, read/write coordination, flush, recovery, compaction trigger |
+| `MemTable` | Ordered in-memory records and approximate memory-size tracking |
+| `WriteAheadLog` | Durable append-before-memory write path and replay during recovery |
+| `SSTable` | Immutable sorted file creation, opening, index loading, point lookup, full record scan for compaction |
+| `Compaction` | Select old SSTables, merge records, drop safe tombstones, replace old files |
 
 ### 3.1 MemTable
 
@@ -57,7 +69,8 @@ Basic properties:
 - sorted by key
 - immutable after creation
 - has an index for lookup
-- newer SSTables have higher sequence/file number
+- regular flushes create higher file numbers for newer SSTables
+- after compaction, read freshness is determined by record sequence numbers, because a newly written compacted file may contain older logical data
 
 ### 3.4 Flush
 
@@ -70,14 +83,25 @@ Simplified flush process:
 3. Reset MemTable.
 4. Clear or rotate WAL after successful flush.
 
+The implementation writes the SSTable first, inserts it into the in-memory SSTable list, then resets the WAL and clears the MemTable. This ordering avoids losing records before they have a disk representation.
+
 ### 3.5 Read Path
 
 The read path should search in the following order:
 
 1. MemTable
-2. SSTables from newest to oldest
+2. SSTables from newest to oldest by record sequence number
 
 If a tombstone is found, return `not found`.
+
+Text flow:
+
+```text
+get(key)
+  -> check MemTable
+  -> check SSTables newest-to-oldest
+  -> return value, not found, or tombstone-as-not-found
+```
 
 ### 3.6 Compaction
 
@@ -90,6 +114,21 @@ Purpose:
 - remove tombstones when safe
 - reduce read amplification
 
+Current simple compaction flow:
+
+```text
+compact()
+  -> select the oldest N SSTables
+  -> read all records from selected files
+  -> for each key, keep the newest record by sequence number
+  -> drop a tombstone only when no older un-compacted SSTable can contain that key
+  -> write one new SSTable
+  -> replace selected SSTables in the in-memory list
+  -> remove old SSTable files
+```
+
+Compaction output receives a new file id, but that file may contain logically older records. For this reason, restart loading sorts SSTables by their maximum record sequence number rather than by file id alone.
+
 ## 4. Data Freshness Rule
 
 When the same key appears in multiple places, the newest version wins.
@@ -100,7 +139,7 @@ Priority order:
 2. Newer SSTable
 3. Older SSTable
 
-This can be implemented using sequence numbers or file creation order.
+This is implemented using sequence numbers. File creation order is only a proxy before compaction; once older SSTables are merged into a new file, the compacted file may have a larger file id than an un-compacted newer SSTable.
 
 ## 5. MVP Invariants
 
@@ -112,8 +151,18 @@ The implementation should preserve these invariants:
 - Newer records override older records.
 - Tombstone means deleted.
 - Recovery rebuilds MemTable from WAL.
+- SSTables are searched in freshness order.
+- Corrupted WAL/SSTable lines are reported as errors instead of being silently ignored.
 
-## 6. Optional Optimizations
+## 6. Limitations
+
+- The line-based format does not escape tabs or newlines in keys and values.
+- SSTable indexes are loaded fully into memory.
+- Compaction is manual and single-threaded.
+- There is no Bloom Filter or cache yet, so a missing or old key may require checking several SSTables.
+- File replacement is simple and suitable for a course project, but not a fully crash-atomic production protocol.
+
+## 7. Optional Optimizations
 
 ### LRU Cache
 

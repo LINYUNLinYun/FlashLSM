@@ -29,6 +29,15 @@ target_link_libraries(${PROJECT_NAME}_demo
         ${PROJECT_NAME}
 )
 
+add_executable(${PROJECT_NAME}_benchmark
+    src/benchmark.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}_benchmark
+    PRIVATE
+        ${PROJECT_NAME}
+)
+
 # 编译成静态库 以便测试使用
 add_library(testkit STATIC
     testkit/testkit.c

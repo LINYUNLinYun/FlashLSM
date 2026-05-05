@@ -4,6 +4,7 @@
 #include <utility>
 #include <iostream>
 #include <algorithm>
+#include <vector>
 
 namespace flashlsm {
 
@@ -96,8 +97,14 @@ void KVStore::load_sstables() {
         // throw std::runtime_error("data directory unexist");
         return;
     }
-    // 存一下id后面排序
+    struct LoadedSSTable {
+        std::uint64_t id;
+        std::uint64_t max_sequence_number;
+        SSTable table;
+    };
+
     std::vector<std::pair<std::uint64_t, std::filesystem::path>> table_files;
+    std::vector<LoadedSSTable> loaded_tables;
     std::uint64_t max_sstable_id = 0;
 
     // 使用directory_iterator遍历目录下的文件
@@ -131,13 +138,27 @@ void KVStore::load_sstables() {
         }
     }
 
-    // 排序 从大到小排序 因为我们采用的是从头插入的方式
-    std::sort(table_files.begin(), table_files.end(), [](const auto& a, const auto& b){
-        return a.first > b.first;
+    for(const auto& [id, path] : table_files){
+        SSTable table = SSTable::open(path);
+        std::uint64_t max_sequence_number = 0;
+        for(const auto& record : table.get_all_records()){
+            max_sequence_number = std::max(max_sequence_number, record.sequence_number);
+        }
+        loaded_tables.push_back(LoadedSSTable{id, max_sequence_number, std::move(table)});
+    }
+
+    // Compaction writes a new file id for merged older data, so file id alone
+    // does not describe freshness after compaction. The read path needs the
+    // table whose newest record has the highest sequence number first.
+    std::sort(loaded_tables.begin(), loaded_tables.end(), [](const auto& a, const auto& b){
+        if(a.max_sequence_number != b.max_sequence_number){
+            return a.max_sequence_number > b.max_sequence_number;
+        }
+        return a.id > b.id;
     });
 
-    for(const auto& [id, path] : table_files){
-        sstables_.emplace_back(SSTable::open(path));
+    for(auto& loaded_table : loaded_tables){
+        sstables_.push_back(std::move(loaded_table.table));
     }
 
     // 更新next_sstable_id_

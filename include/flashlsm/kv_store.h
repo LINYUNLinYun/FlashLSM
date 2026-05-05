@@ -14,7 +14,7 @@
 
 namespace flashlsm {
 
-// 顶层协调器，负责组织 LSM 的写路径、读路径、flush 和恢复流程。
+// 顶层数据结构
 class KVStore {
 public:
     explicit KVStore(std::filesystem::path data_directory,

@@ -12,7 +12,6 @@ enum class RecordType {
 };
 
 // MemTable、WAL 和 SSTable 共用的统一记录结构。
-// sequence_number 单调递增，数值越大表示版本越新。
 struct Record {
     std::uint64_t sequence_number {0};      // 序列号，单调递增
     RecordType type {RecordType::Put};      // 记录的类型
